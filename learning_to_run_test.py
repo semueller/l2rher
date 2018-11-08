@@ -163,7 +163,7 @@ def train(env, policy, rollout_worker,
             for ag in episode['ag']:
                 goals.append(ag[goal_step_size])
             policy.store_episode(episode,  # get trajectories with real goals [g] in observation
-                                 update_stats=False)  # TODO set to default update_stats=True again
+                                 update_stats=True)  # TODO set to default update_stats=True again
 
         for _ in range(n_cycles):
             policy.train()
