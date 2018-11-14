@@ -16,6 +16,8 @@ from baselines.her.rollout import RolloutWorker
 from baselines.her.util import mpi_fork
 from baselines.her.experiment.train import mpi_average, load_stats
 
+from baselines.her.her import make_sample_her_transitions
+
 from subprocess import CalledProcessError
 from importlib import import_module
 
@@ -62,9 +64,9 @@ def make_running_env(visualize=False):
     _osim = import_module('osim.env')
     # envname needs to be set outside
     env = getattr(_osim, make_running_env.envname)
-    env = env(visualize=visualize)
+    env = env(visualize=visualize, goaltype=make_running_env.goaltype)
     # needs attr _max_episode_steps for configuration (of what? T never used in rolloutworker/ ddpg -> for HER?
-    env.time_limit = 20  # default is 1000
+    env.time_limit   = 100  # default is 1000
     env._max_episode_steps = env.time_limit
     return env
 
@@ -85,15 +87,15 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
 
         # Select which episodes and time steps to use.
         episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)  # select episode
-        t_samples = np.random.randint(T-goal_step_size, size=batch_size)  # select time step
+        t_samples = np.random.randint(T, size=batch_size)  # select time step
         transitions = {key: episode_batch[key][episode_idxs, t_samples].copy()
                        for key in episode_batch.keys()}
 
         # Select future time indexes proportional with probability future_p. These
         # will be used for HER replay by substituting in future goals.a
         her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)  # select what indices to give her trtmnt
-        future_offset = np.array([goal_step_size]*batch_size, dtype=int)  # np.random.uniform(size=batch_size) * (T - t_samples)
-        # future_offset = future_offset.astype(int)
+        future_offset = np.random.uniform(size=batch_size) * (T - t_samples)
+        future_offset = future_offset.astype(int)
         future_t = (t_samples + 1 + future_offset)[her_indexes]
 
         # Replace goal with achieved goal but only for the previously-selected
@@ -106,9 +108,16 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
         # TODO how are the transitions actually structured ?
         # TODO move the goals into the observations ?
         # TODO her paper: new transition (s_t||g', a_t, r'_t, s_t+1||g')
-        # transitions['o'][:, goal_length:] = transitions['g']  # put
-        # transitions['o_2'][:, goal_length:] = transitions['g']
-
+        # L2RunEnvHer always appends goal to the END of the observation
+        # def swap_goals(o, g):
+        #     lg = len(g)
+        #     o[-lg:] = g
+        #     return o
+        # for i in range(len(transitions['o'])):
+        #     transitions['o'][i] = swap_goals(transitions['o'][i], transitions['g'][i])
+        #     transitions['o_2'][i] = swap_goals(transitions['o_2'][i], transitions['g'][i])
+        transitions['o'][:, -goal_length:] = transitions['g']  # put
+        transitions['o_2'][:, -goal_length:] = transitions['g']
         # Reconstruct info dictionary for reward  computation.
         info = {}
         for key, value in transitions.items():
@@ -203,7 +212,7 @@ def train(env, policy, rollout_worker,
 
 def launch(
         env, logdir, n_epochs, num_cpu, seed, replay_strategy, policy_save_interval, clip_return, policy_path,
-        with_forces, plot_forces,
+        with_forces, plot_forces, goaltype='',
         scope=None, override_params={}, save_policies=True, one_hot_encoding=None
 ):
 
@@ -249,6 +258,7 @@ def launch(
     with open(os.path.join(logger.get_dir(), 'params.json'), 'w') as f:
         json.dump(params, f)
     make_running_env.envname = env
+    make_running_env.goaltype = goaltype
     params['make_env'] = make_running_env
     params = config.prepare_params(params)
     config.log_params(params, logger=logger)
@@ -311,6 +321,7 @@ def launch(
 @click.option('--plot_forces', type=bool, default=False)
 @click.option('--policy_path', type=str, default='./checkpoint/', help='path to policy to be loaded and trained')
 @click.option('--scope', type=str, default=None, help='name of scope for tf')
+@click.option('--goaltype', type=str, default='')
 def main(**kwargs):
     launch(**kwargs)
 
