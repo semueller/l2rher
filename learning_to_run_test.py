@@ -171,8 +171,7 @@ def train(env, policy, rollout_worker,
             # and store the achieved goal in step t = goal_step size in goals
             for ag in episode['ag']:
                 goals.append(ag[goal_step_size])
-            policy.store_episode(episode,  # get trajectories with real goals [g] in observation
-                                 update_stats=True)  # TODO set to default update_stats=True again
+            policy.store_episode(episode, ) # get trajectories with real goals [g] in observation
 
         for _ in range(n_cycles):
             policy.train()
@@ -267,7 +266,7 @@ def launch(
 
     policy = config.configure_ddpg(dims=dims, params=params,
                                    clip_return=clip_return, scope=scope,
-                                   make_her_function=make_her_function
+                                   make_her_function=make_sample_her_transitions
                                    )
 
     rollout_params = {
