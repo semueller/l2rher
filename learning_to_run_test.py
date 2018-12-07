@@ -6,7 +6,7 @@ import numpy as np
 import json
 
 from mpi4py import MPI
-
+import dill as pickle
 import tensorflow as tf
 
 import baselines.her.experiment.config as config
@@ -21,9 +21,25 @@ from baselines.her.her import make_sample_her_transitions
 from subprocess import CalledProcessError
 from importlib import import_module
 
-
 goal_step_size = 1  # use this as a global counter to be able to update the value in _sample_her_transitions
 
+
+def load_goals(path):
+    with open(path, 'rb') as file:
+        x = []
+        unpickler = pickle.Unpickler(file)
+        for i in range(0, 1000000):
+            try:
+                data = unpickler.load()
+                res = []
+                # data = {k: data[k] for k in [key for key in list(data.keys()) if "pos" in key and "rot" not in key]}
+                for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
+                    res += data["body_pos"][body_part][0:2]
+                x.append(res)
+
+            except EOFError:
+                break
+    return x
 
 def get_random_goals(goals, n_goals):
     res = np.random.permutation(goals)
@@ -66,7 +82,7 @@ def make_running_env(visualize=False):
     env = getattr(_osim, make_running_env.envname)
     env = env(visualize=visualize, goaltype=make_running_env.goaltype)
     # needs attr _max_episode_steps for configuration (of what? T never used in rolloutworker/ ddpg -> for HER?
-    env.time_limit   = 100  # default is 1000
+    env.time_limit = 100  # default is 1000
     env._max_episode_steps = env.time_limit
     return env
 
@@ -76,7 +92,8 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
     copied from baselines.her.her
     but we need extra control over what goal is chosen
     '''
-    future_p = 1-(1. / (1+replay_k))
+    future_p = 1 - (1. / (1 + replay_k))
+
     def _sample_her_transitions(episode_batch, batch_size_in_transitions):
         """episode_batch is {key: array(buffer_size x T x dim_key)}
         """
@@ -88,8 +105,13 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
         # Select which episodes and time steps to use.
         episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)  # select episode
         t_samples = np.random.randint(T, size=batch_size)  # select time step
+        # t_samples_quarter = np.arange(24, T, 12)
+
         transitions = {key: episode_batch[key][episode_idxs, t_samples].copy()
                        for key in episode_batch.keys()}
+
+        # transitions_quarter = {key: episode_batch[key][episode_idxs, t_samples_quarter].copy()
+        #                        for key in episode_batch.keys()}
 
         # Select future time indexes proportional with probability future_p. These
         # will be used for HER replay by substituting in future goals.a
@@ -102,23 +124,7 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
         # HER transitions (as defined by her_indexes). For the other transitions,
         # keep the original goal.
         future_ag = episode_batch['ag'][episode_idxs[her_indexes], future_t]
-        goal_length = episode_batch['ag'][0][0].shape[0]
         transitions['g'][her_indexes] = future_ag
-        # TODO until here this is the vanilla her function from baselines, just using goal_step_size instead of random
-        # TODO how are the transitions actually structured ?
-        # TODO move the goals into the observations ?
-        # TODO her paper: new transition (s_t||g', a_t, r'_t, s_t+1||g')
-        # L2RunEnvHer always appends goal to the END of the observation
-        # def swap_goals(o, g):
-        #     lg = len(g)
-        #     o[-lg:] = g
-        #     return o
-        # for i in range(len(transitions['o'])):
-        #     transitions['o'][i] = swap_goals(transitions['o'][i], transitions['g'][i])
-        #     transitions['o_2'][i] = swap_goals(transitions['o_2'][i], transitions['g'][i])
-        transitions['o'][:, -goal_length:] = transitions['g']  # put
-        transitions['o_2'][:, -goal_length:] = transitions['g']
-        # Reconstruct info dictionary for reward  computation.
         info = {}
         for key, value in transitions.items():
             if key.startswith('info_'):
@@ -135,17 +141,17 @@ def make_her_function(replay_strategy, replay_k, reward_fun):
         assert (transitions['u'].shape[0] == batch_size_in_transitions)
 
         return transitions
+
     return _sample_her_transitions
 
 
 def train(env, policy, rollout_worker,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval, evaluator, policy_path,
           save_policies=True, model_name='model.ckpt', **kwargs):
-
     global goal_step_size
     saver = tf.train.Saver()
-    if os.path.isfile(policy_path+model_name):
-        saver.restore(policy.sess, policy_path+model_name)
+    if os.path.isfile(policy_path + model_name):
+        saver.restore(policy.sess, policy_path + model_name)
         logger.info("Successfully restored policy from {}".format(policy_path))
     else:
         logger.info("no policy {} found in {}".format(model_name, policy_path))
@@ -153,18 +159,20 @@ def train(env, policy, rollout_worker,
             logger.info('creating directory {}'.format(policy_path))
             os.mkdir(policy_path)
 
-    epoch_log_path = policy_path+'epoch.txt'
+    epoch_log_path = policy_path + 'epoch.txt'
 
     print("generating first goals")
+    goals_new = load_goals("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat")
     episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
     goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
     new_rollouts_per_epoch = 1
     trained_epochs, best_success_rate = load_stats(epoch_log_path)  # use load_stats function for continuing training
 
     rank = MPI.COMM_WORLD.Get_rank()
-    for epoch in range(trained_epochs+1, n_epochs):
+    for epoch in range(trained_epochs + 1, n_epochs):
         logger.info('starting epoch: {}'.format(epoch))
-        for g in np.random.permutation(goals)[:new_rollouts_per_epoch]: # not for each g in goals, that would grow quite fast
+        for g in np.random.permutation(goals)[
+                 :new_rollouts_per_epoch]:  # not for each g in goals, that would grow quite fast
             for e in rollout_worker.envs:
                 e.goal = g
             episode = rollout_worker.generate_rollouts()
@@ -197,8 +205,7 @@ def train(env, policy, rollout_worker,
 
         if save_policies:
             save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
-                model_name, epoch_log_path, rank)  # not beatiful but declutters this part
-
+                        model_name, epoch_log_path, rank)  # not beatiful but declutters this part
 
         # make sure that different threads have different seeds
         local_uniform = np.random.uniform(size=(1,))
@@ -215,7 +222,6 @@ def launch(
         with_forces, plot_forces, goaltype='',
         scope=None, override_params={}, save_policies=True, one_hot_encoding=None
 ):
-
     # Fork for multi-CPU MPI implementation.
     if num_cpu > 1:
         try:
@@ -307,15 +313,19 @@ def launch(
         policy_path=policy_path)
 
 
-
 @click.command()
-@click.option('--env', type=str, default='L2RunEnvHER', help='the name of the OpenAI Gym environment that you want to train on')
-@click.option('--logdir', type=str, default=None, help='the path to where logs and policy pickles should go. If not specified, creates a folder in /tmp/')
+@click.option('--env', type=str, default='L2RunEnvHER',
+              help='the name of the OpenAI Gym environment that you want to train on')
+@click.option('--logdir', type=str, default=None,
+              help='the path to where logs and policy pickles should go. If not specified, creates a folder in /tmp/')
 @click.option('--n_epochs', type=int, default=50, help='the number of training epochs to run')
 @click.option('--num_cpu', type=int, default=1, help='the number of CPU cores to use (using MPI)')
-@click.option('--seed', type=int, default=0, help='the random seed used to seed both the environment and the training code')
-@click.option('--policy_save_interval', type=int, default=5, help='the interval with which policy pickles are saved. If set to 0, only the best and latest policy will be pickled.')
-@click.option('--replay_strategy', type=click.Choice(['future', 'none']), default='future', help='the HER replay strategy to be used. "future" uses HER, "none" disables HER.')
+@click.option('--seed', type=int, default=0,
+              help='the random seed used to seed both the environment and the training code')
+@click.option('--policy_save_interval', type=int, default=5,
+              help='the interval with which policy pickles are saved. If set to 0, only the best and latest policy will be pickled.')
+@click.option('--replay_strategy', type=click.Choice(['future', 'none']), default='future',
+              help='the HER replay strategy to be used. "future" uses HER, "none" disables HER.')
 @click.option('--clip_return', type=int, default=1, help='whether or not returns should be clipped')
 @click.option('--with_forces', type=bool, default=False)
 @click.option('--plot_forces', type=bool, default=False)
