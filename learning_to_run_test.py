@@ -21,6 +21,7 @@ from baselines.her.her import make_sample_her_transitions
 from subprocess import CalledProcessError
 from importlib import import_module
 
+from environments import RunEnv2HER, RunEnv2
 
 goal_step_size = 1  # use this as a global counter to be able to update the value in _sample_her_transitions
 
@@ -59,12 +60,48 @@ def save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, e
             logger.info(e)
         print("saved policy to {}".format(pth))
 
+def get_args():
+    # taken from L2R.run_experiment (0123Andrew/L2R.git), to parametrize RunEnv2HER
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--modeldim', dest='modeldim', action='store', default='3D', choices=('3D', '2D'), type=str)
+    parser.add_argument('--prosthetic', dest='prosthetic', action='store', default=1, type=int)
+    parser.add_argument('--proj', type=str, default='3DPro37', help='dict to projection (version): 2D35, 3DPro35, 3DPro37, 3D39, 3DPro37_2, 3D39_2')
+    parser.add_argument('--accuracy', dest='accuracy', action='store', default=5e-5, type=float)
+    parser.add_argument('--difficulty', dest='difficulty', action='store', default=0, type=int)
+    parser.add_argument('--episodes', type=int, default=37, help="Number of test episodes.")
+    parser.add_argument('--critic_layers', nargs='+', type=int, default=[128, 128], help="critic hidden layer sizes as tuple")  # 512
+    parser.add_argument('--actor_layers', nargs='+', type=int, default=[128, 128], help="actor hidden layer sizes as tuple")  # 512
+    parser.add_argument('--layer_norm', action='store_true', help="Use layer normalization.")
+    parser.add_argument('--skip_frame', type=int, default=3, help='skip_frame')
+    parser.add_argument('--weights', type=str, default=None, help='weights to load')
+    parser.add_argument('--plot', type=int, default=0, help='online plot of an observation')
+    parser.add_argument('--saveplots', type=int, default=0, help='png of an episode')
+    parser.add_argument('--reward_func', type=str, default='3D_pen01_VelMass', help='3D_pen01_VelMass  or  3D_penAdd_VelMass  or  3D_pen01_VelMassFoot or 3D_penAdd_VelMassFoot2')
+    parser.add_argument('--saveobs', type=int, default=0, help='Store Observations')
+    parser.add_argument('--saveacts', type=int, default=0, help='Store Actions')
+    args = parser.parse_args()
+    args.modeldim = args.modeldim.upper()
 
-def make_running_env(visualize=False):
-    _osim = import_module('osim.env')
-    # envname needs to be set outside
-    env = getattr(_osim, make_running_env.envname)
-    env = env(visualize=visualize, goaltype=make_running_env.goaltype)
+    args.weights = 'weights/weights_2D_X_53.pkl'; args.proj = '2D35'; args.critic_layers = [64, 64]; args.actor_layers = [64, 64]; args.saveplots = 0; args.modeldim = '2D'; args.prosthetic = 0; args.episodes=20;
+    args.saveobs = 1
+    return args
+
+
+def make_running_env(visualize=False, envname=''):
+    if envname is 'RunEnv2HER':
+        env = RunEnv2HER
+        args = get_args()
+        args.proj='3DPro37'
+        env = env(visualize=True, model=args.modeldim, prosthetic=args.prosthetic, difficulty=args.difficulty, skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
+    elif envname is 'L2RunEnvHER':
+        _osim = import_module('osim.env')
+        # envname needs to be set outside
+        env = getattr(_osim, make_running_env.envname)
+        env = env(visualize=True)
+    else:
+        raise ValueError('env not recognized, '
+                       'must be one of[{RunEnv2HER, L2RunEnvHER], but was {}'.format(make_running_env.envname))
     # needs attr _max_episode_steps for configuration (of what? T never used in rolloutworker/ ddpg -> for HER?
     env.time_limit   = 100  # default is 1000
     env._max_episode_steps = env.time_limit
@@ -256,7 +293,7 @@ def launch(
     params.update(**override_params)  # makes it possible to override any parameter
     with open(os.path.join(logger.get_dir(), 'params.json'), 'w') as f:
         json.dump(params, f)
-    make_running_env.envname = env
+    make_running_env.envname = 'RunEnv2HER'  # select what env, see make_running_env method!
     make_running_env.goaltype = goaltype
     params['make_env'] = make_running_env
     params = config.prepare_params(params)
