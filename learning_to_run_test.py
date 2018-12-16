@@ -41,6 +41,7 @@ def load_goals(path):
                 break
     return x
 
+
 def get_random_goals(goals, n_goals):
     res = np.random.permutation(goals)
     if len(res) > n_goals:
