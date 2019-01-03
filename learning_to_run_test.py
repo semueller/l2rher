@@ -88,91 +88,27 @@ def get_args():
     return args
 
 
-def make_running_env(visualize=False, envname=''):
-    if envname is 'RunEnv2HER':
+def make_running_env(visualize=False):
+    assert(hasattr(make_running_env, 'envname'))
+    if make_running_env.envname == 'RunEnv2HER':
+        assert(hasattr(make_running_env, 'goaltype'))
         env = RunEnv2HER
         args = get_args()
         args.proj='3DPro37'
-        env = env(visualize=True, model=args.modeldim, prosthetic=args.prosthetic, difficulty=args.difficulty, skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
-    elif envname is 'L2RunEnvHER':
+        env = env(goaltype=make_running_env.goaltype, visualize=True, model=args.modeldim, prosthetic=args.prosthetic, difficulty=args.difficulty, skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
+    elif make_running_env.envname == 'L2RunEnvHER':
         _osim = import_module('osim.env')
         # envname needs to be set outside
         env = getattr(_osim, make_running_env.envname)
         env = env(visualize=True)
     else:
         raise ValueError('env not recognized, '
-                       'must be one of[{RunEnv2HER, L2RunEnvHER], but was {}'.format(make_running_env.envname))
+                       'must be one of[RunEnv2HER, L2RunEnvHER], but was {}'.format(make_running_env.envname))
     # needs attr _max_episode_steps for configuration (of what? T never used in rolloutworker/ ddpg -> for HER?
     env.time_limit   = 100  # default is 1000
     env._max_episode_steps = env.time_limit
     return env
 
-
-def make_her_function(replay_strategy, replay_k, reward_fun):
-    '''
-    copied from baselines.her.her
-    but we need extra control over what goal is chosen
-    '''
-    future_p = 1-(1. / (1+replay_k))
-    def _sample_her_transitions(episode_batch, batch_size_in_transitions):
-        """episode_batch is {key: array(buffer_size x T x dim_key)}
-        """
-        global goal_step_size
-        T = episode_batch['u'].shape[1]
-        rollout_batch_size = episode_batch['u'].shape[0]
-        batch_size = batch_size_in_transitions
-
-        # Select which episodes and time steps to use.
-        episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)  # select episode
-        t_samples = np.random.randint(T, size=batch_size)  # select time step
-        transitions = {key: episode_batch[key][episode_idxs, t_samples].copy()
-                       for key in episode_batch.keys()}
-
-        # Select future time indexes proportional with probability future_p. These
-        # will be used for HER replay by substituting in future goals.a
-        her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)  # select what indices to give her trtmnt
-        future_offset = np.random.uniform(size=batch_size) * (T - t_samples)
-        future_offset = future_offset.astype(int)
-        future_t = (t_samples + 1 + future_offset)[her_indexes]
-
-        # Replace goal with achieved goal but only for the previously-selected
-        # HER transitions (as defined by her_indexes). For the other transitions,
-        # keep the original goal.
-        future_ag = episode_batch['ag'][episode_idxs[her_indexes], future_t]
-        goal_length = episode_batch['ag'][0][0].shape[0]
-        transitions['g'][her_indexes] = future_ag
-        # TODO until here this is the vanilla her function from baselines, just using goal_step_size instead of random
-        # TODO how are the transitions actually structured ?
-        # TODO move the goals into the observations ?
-        # TODO her paper: new transition (s_t||g', a_t, r'_t, s_t+1||g')
-        # L2RunEnvHer always appends goal to the END of the observation
-        # def swap_goals(o, g):
-        #     lg = len(g)
-        #     o[-lg:] = g
-        #     return o
-        # for i in range(len(transitions['o'])):
-        #     transitions['o'][i] = swap_goals(transitions['o'][i], transitions['g'][i])
-        #     transitions['o_2'][i] = swap_goals(transitions['o_2'][i], transitions['g'][i])
-        transitions['o'][:, -goal_length:] = transitions['g']  # put
-        transitions['o_2'][:, -goal_length:] = transitions['g']
-        # Reconstruct info dictionary for reward  computation.
-        info = {}
-        for key, value in transitions.items():
-            if key.startswith('info_'):
-                info[key.replace('info_', '')] = value
-
-        # Re-compute reward since we may have substituted the goal.
-        reward_params = {k: transitions[k] for k in ['ag_2', 'g']}
-        reward_params['info'] = info
-        transitions['r'] = reward_fun(**reward_params)
-
-        transitions = {k: transitions[k].reshape(batch_size, *transitions[k].shape[1:])
-                       for k in transitions.keys()}
-
-        assert (transitions['u'].shape[0] == batch_size_in_transitions)
-
-        return transitions
-    return _sample_her_transitions
 
 
 def train(env, policy, rollout_worker,
@@ -208,15 +144,17 @@ def train(env, policy, rollout_worker,
             # and store the achieved goal in step t = goal_step size in goals
             for ag in episode['ag']:
                 goals.append(ag[goal_step_size])
-            policy.store_episode(episode, ) # get trajectories with real goals [g] in observation
+            policy.store_episode(episode) # get trajectories with real goals [g] in observation
 
         for _ in range(n_cycles):
+        # for _ in range(2):
             policy.train()
         policy.update_target_net()
 
         # evaluate
         evaluator.clear_history()
         goals_evaluation = get_random_goals(goals, n_test_rollouts)
+        # goals_evaluation = get_random_goals(goals, 2)
         for g in goals_evaluation:
             for e in evaluator.envs:
                 e.goal = g
@@ -293,7 +231,8 @@ def launch(
     params.update(**override_params)  # makes it possible to override any parameter
     with open(os.path.join(logger.get_dir(), 'params.json'), 'w') as f:
         json.dump(params, f)
-    make_running_env.envname = 'RunEnv2HER'  # select what env, see make_running_env method!
+    # make_running_env.envname = 'L2RunEnvHER'  # select what env, see make_running_env method! L2RunEnvHER or  RunEnv2HER
+    make_running_env.envname = 'RunEnv2HER'  # select what env, see make_running_env method! L2RunEnvHER or  RunEnv2HER
     make_running_env.goaltype = goaltype
     params['make_env'] = make_running_env
     params = config.prepare_params(params)
@@ -357,7 +296,7 @@ def launch(
 @click.option('--plot_forces', type=bool, default=False)
 @click.option('--policy_path', type=str, default='./checkpoint/', help='path to policy to be loaded and trained')
 @click.option('--scope', type=str, default=None, help='name of scope for tf')
-@click.option('--goaltype', type=str, default='')
+@click.option('--goaltype', type=str, default='pos_mass')
 def main(**kwargs):
     launch(**kwargs)
 

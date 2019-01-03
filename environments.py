@@ -860,11 +860,12 @@ class RunEnv2(ProstheticsEnv):
             return projection
 
 
-class RunEnv2HER(RunEnv2):  # semueller: Converts RunEnv2 to baselines.her compatible env
+class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her compatible env
+    tolerance = 1e-2 # TODO tune
     def __init__(self, goaltype='', **runenv2_args):
         super(RunEnv2HER, self).__init__(**runenv2_args)
         self.goal = None
-        if goaltype is 'pos_mass':
+        if goaltype == 'pos_mass':
             self.get_achieved_goal = self._goal_pos_mass
         else:
             self.get_achieved_goal = self._goal_std
@@ -908,6 +909,36 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts RunEnv2 to baselines.her compa
 
         goal += [state_desc["misc"]["mass_center_pos"][i] - pelvis[i] for i in range(2)]
         return goal
+
+    @staticmethod
+    def metric(p1, p2):
+        ''':return: squared euclidean of np.arrays p1 and p2'''
+        assert(p1.shape == p2.shape)
+        if len(p1.shape) == 1:
+            p1 = p1.reshape((1,)+p1.shape)
+            p2 = p2.reshape((1,)+p2.shape)
+        return np.sum(np.square((p1-p2)), axis=1)
+        # return np.sum(np.square((p1-p2)))
+
+    def _is_success(self, achieved_goal, desired_goal):
+        if achieved_goal is None:
+            raise ValueError("{}: achieved_goal was None".format(self.__class__))
+        if desired_goal is None:
+            return np.float32(0)
+        d = self.metric(achieved_goal, desired_goal)
+        # return np.float32(1.0)
+        return np.float32(d <= self.tolerance)
+
+    def step(self, action, project = True):
+        obs, r, d, _ = super(RunEnv2HER, self).step(action, project)
+        info = {
+            'is_success': self._is_success(obs['achieved_goal'], self.goal)
+        }
+        return obs, r, d, info
+
+    def compute_reward(self, achieved_goal, desired_goal, info):
+        dist = self.metric(achieved_goal, desired_goal)
+        return np.float32(dist <= self.tolerance)
 
     def get_observation(self):
         obs = super(RunEnv2HER, self).get_observation()
