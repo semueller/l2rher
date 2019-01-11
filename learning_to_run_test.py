@@ -26,18 +26,24 @@ from environments import RunEnv2HER, RunEnv2
 goal_step_size = 1  # use this as a global counter to be able to update the value in _sample_her_transitions
 
 
-def load_goals(path):
+def sample_goal(path, samples=1, strategy="fourth", goal_type="goal_mass"):
     with open(path, 'rb') as file:
         x = []
         unpickler = pickle.Unpickler(file)
         for i in range(0, 1000000):
             try:
-                data = unpickler.load()
-                res = []
-                # data = {k: data[k] for k in [key for key in list(data.keys()) if "pos" in key and "rot" not in key]}
-                for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
-                    res += data["body_pos"][body_part][0:2]
-                x.append(res)
+                if strategy == "fourth":
+                    if i % 12 == 0:
+                        if i / 12 == samples:
+                            break
+
+                        data = unpickler.load()
+                        res = []
+                        if goal_type == "goal_mass":
+                            for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
+                                res += data["body_pos"][body_part][0:2]
+
+                        x.append(res)
 
             except EOFError:
                 break
@@ -203,7 +209,12 @@ def train(env, policy, rollout_worker,
     epoch_log_path = policy_path + 'epoch.txt'
 
     print("generating first goals")
-    goals_new = load_goals("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat")
+    goals_new = sample_goal("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat", samples=2,
+                            strategy="fourth", goal_type="goal_mass")
+    print(np.array(goals_new[0]).shape)
+    goals_new = sample_goal("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat", samples=2,
+                            strategy="fourth", goal_type="blubb")
+    print(np.array(goals_new[0]).shape)
     episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
     goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
     new_rollouts_per_epoch = 1
