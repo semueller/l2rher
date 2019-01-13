@@ -36,12 +36,12 @@ def sample_goal(path, samples=1, strategy="fourth", goal_type="goal_mass"):
                     if i % 12 == 0:
                         if i / 12 == samples:
                             break
-
                         data = unpickler.load()
                         res = []
                         if goal_type == "goal_mass":
                             for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
                                 res += data["body_pos"][body_part][0:2]
+
 
                         x.append(res)
 
@@ -211,10 +211,8 @@ def train(env, policy, rollout_worker,
     print("generating first goals")
     goals_new = sample_goal("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat", samples=2,
                             strategy="fourth", goal_type="goal_mass")
-    print(np.array(goals_new[0]).shape)
     goals_new = sample_goal("/home/hendrik/l2rher/observations_2018-12-03 11:59:54.820875.dat", samples=2,
                             strategy="fourth", goal_type="blubb")
-    print(np.array(goals_new[0]).shape)
     episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
     goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
     new_rollouts_per_epoch = 1
