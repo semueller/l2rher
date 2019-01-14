@@ -861,19 +861,43 @@ class RunEnv2(ProstheticsEnv):
 
 
 class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her compatible env
-    tolerance = 1e-2 # TODO tune
-    def __init__(self, goaltype='', **runenv2_args):
+    def __init__(self, goaltype='', tolerance=None, **runenv2_args):
         super(RunEnv2HER, self).__init__(**runenv2_args)
         self.goal = None
         if goaltype == 'pos_mass':
             self.get_achieved_goal = self._goal_pos_mass
+        elif goaltype == 'no_vel_no_rot':
+            self.get_achieved_goal = self._goal_no_vel_no_rot
+        elif goaltype == 'dict_to_vec':
+            self.get_achieved_goal = self._goal_dict_to_vec
         else:
             self.get_achieved_goal = self._goal_std
+
+        self.tolerance = tolerance # TODO tune
 
     def _goal_std(self, state_desc=None):
         if not state_desc:
             return super(RunEnv2HER, self).get_state_desc()
         return state_desc
+
+    def _goal_dict_to_vec(self, state_desc=None):
+        if not state_desc:
+            state_desc = super(RunEnv2HER, self).get_state_desc()
+        goal = self.dict_to_vec(state_desc)
+        return goal
+
+    def _goal_no_vel_no_rot(self, state_desc=None):
+        if not state_desc:
+            state_desc = super(RunEnv2HER, self).get_state_desc()
+        goal = []
+        for k, v in state_desc.items():
+            if 'vel' in k or 'rot' in k:
+                continue
+            for k2, v2, in v.items():
+                if 'vel' in k2 or 'rot' in k2:
+                    continue
+                goal.append(v2[0:2])
+        return goal
 
     def _goal_pos_mass(self, state_desc=None):
         if not state_desc:
@@ -947,6 +971,9 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her
             desired_goal = [0]*len(achieved_goal)
         else:
             desired_goal = list(self.goal)
+        if self.tolerance is None:
+            self.tolerance = 0.075*len(desired_goal)
+            print('\t\t TOLERANCE SET TO {}'.format(self.tolerance))
         return {
             'observation': np.array(obs),
             'desired_goal': np.array(desired_goal),

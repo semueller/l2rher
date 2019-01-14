@@ -30,43 +30,33 @@ goal_step_size = 1  # use this as a global counter to be able to update the valu
 def sample_goal(path, env=None, num_samples=1, offset=12):# strategy="fourth", goal_type="goal_mass"):
     assert(env is not None), "env was None"
     assert(os.path.isfile(path)), "path didn't point to a file"
-    # with open(path, 'rb') as file:
-    #     x = []
-    #     unpickler = pickle.Unpickler(file)
-    #     for i in range(0, 1000000):
-    #         try:
-    #             if strategy == "fourth":
-    #                 if i % 12 == 0:
-    #                     if i / 12 == samples:
-    #                         break
-    #                     data = unpickler.load()
-    #                     res = []
-    #                     if goal_type == "goal_mass":
-    #                         for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
-    #                             res += data["body_pos"][body_part][0:2]
-    #
-    #
-    #                     x.append(res)
-    #
-    #         except EOFError:
-    #             break
-    # return x
+
     with open(path, 'rb') as file:
         res = []
         iteration_number = 0
         unpickled = pickle.Unpickler(file)
-        while True:
-            if iteration_number == num_samples:
-                break
-            iteration_number += 1
+        data = []
+        #
+        # while True:
+        #     if iteration_number == num_samples:
+        #         break
+        #     iteration_number += 1
+        #     try:
+        #         for i in range(offset-1):
+        #             _ = unpickled.load()
+        #         data = unpickled.load()
+        #         goal = env.get_achieved_goal(data)
+        #         res.append(goal)
+        #     except EOFError:
+        #         break
+        for _ in range(10):
             try:
-                for i in range(offset-1):
-                    _ = unpickled.load()
                 data = unpickled.load()
                 goal = env.get_achieved_goal(data)
                 res.append(goal)
             except EOFError:
                 break
+
     print('successfully loaded {} goals'.format(len(res)))
     return res
 
@@ -125,6 +115,7 @@ def get_args():
     parser.add_argument('--reward_func', type=str, default='3D_pen01_VelMass', help='3D_pen01_VelMass  or  3D_penAdd_VelMass  or  3D_pen01_VelMassFoot or 3D_penAdd_VelMassFoot2')
     parser.add_argument('--saveobs', type=int, default=0, help='Store Observations')
     parser.add_argument('--saveacts', type=int, default=0, help='Store Actions')
+    parser.add_argument('--goaltype', type=str, default='pos_mass')
     args = parser.parse_args()
     args.modeldim = args.modeldim.upper()
 
@@ -160,6 +151,10 @@ def train(env, policy, rollout_worker,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval, evaluator, policy_path,
           save_policies=True, model_name='model.ckpt', **kwargs):
 
+    testing = True
+    if testing:
+        n_test_rollouts = 1
+
     global goal_step_size
     saver = tf.train.Saver()
     if os.path.isfile(policy_path+model_name):
@@ -172,13 +167,10 @@ def train(env, policy, rollout_worker,
             os.mkdir(policy_path)
 
     epoch_log_path = policy_path+'epoch.txt'
-
-    # print("generating first goals")
-    # episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
-    # goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
+    # load goals from observations in path
     goals = sample_goal(path=os.getcwd()+'/data/observations_2019-01-09 22:13:01.435718.dat',
                         env=rollout_worker.envs[0], offset=12, num_samples=10)
-    new_rollouts_per_epoch = 1
+    new_rollouts_per_epoch = 5 if not testing else 1
     trained_epochs, best_success_rate = load_stats(epoch_log_path)  # use load_stats function for continuing training
 
     rank = MPI.COMM_WORLD.Get_rank()
@@ -190,15 +182,11 @@ def train(env, policy, rollout_worker,
             for e in rollout_worker.envs:
                 e.goal = g
             episode = rollout_worker.generate_rollouts()
-            # and store the achieved goal in step t = goal_step size in goals
-            # for ag in episode['ag']:
-            #     goals.append(ag[goal_step_size])
             policy.store_episode(episode) # get trajectories with real goals [g] in observation
 
-        if rank==0:
+        if rank == 0:
             print("\ttrain")
-        # for _ in range(n_cycles):
-        for _ in range(2):
+        for _ in range(n_cycles):
             policy.train()
         policy.update_target_net()
 
@@ -212,7 +200,6 @@ def train(env, policy, rollout_worker,
             for e in evaluator.envs:
                 e.goal = g
             evaluator.generate_rollouts()
-            break
 
         # save the policy if it's better than the previous ones
         success_rate = mpi_average(evaluator.current_success_rate())
