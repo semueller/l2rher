@@ -4,6 +4,7 @@ import sys
 import click
 import numpy as np
 import json
+import pickle
 
 from mpi4py import MPI
 
@@ -24,6 +25,50 @@ from importlib import import_module
 from environments import RunEnv2HER, RunEnv2
 
 goal_step_size = 1  # use this as a global counter to be able to update the value in _sample_her_transitions
+
+
+def sample_goal(path, env=None, num_samples=1, offset=12):# strategy="fourth", goal_type="goal_mass"):
+    assert(env is not None), "env was None"
+    assert(os.path.isfile(path)), "path didn't point to a file"
+    # with open(path, 'rb') as file:
+    #     x = []
+    #     unpickler = pickle.Unpickler(file)
+    #     for i in range(0, 1000000):
+    #         try:
+    #             if strategy == "fourth":
+    #                 if i % 12 == 0:
+    #                     if i / 12 == samples:
+    #                         break
+    #                     data = unpickler.load()
+    #                     res = []
+    #                     if goal_type == "goal_mass":
+    #                         for body_part in ["head", "pelvis", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
+    #                             res += data["body_pos"][body_part][0:2]
+    #
+    #
+    #                     x.append(res)
+    #
+    #         except EOFError:
+    #             break
+    # return x
+    with open(path, 'rb') as file:
+        res = []
+        iteration_number = 0
+        unpickled = pickle.Unpickler(file)
+        while True:
+            if iteration_number == num_samples:
+                break
+            iteration_number += 1
+            try:
+                for i in range(offset-1):
+                    _ = unpickled.load()
+                data = unpickled.load()
+                goal = env.get_achieved_goal(data)
+                res.append(goal)
+            except EOFError:
+                break
+    print('successfully loaded {} goals'.format(len(res)))
+    return res
 
 
 def get_random_goals(goals, n_goals):
@@ -128,26 +173,32 @@ def train(env, policy, rollout_worker,
 
     epoch_log_path = policy_path+'epoch.txt'
 
-    print("generating first goals")
-    episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
-    goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
+    # print("generating first goals")
+    # episode = rollout_worker.generate_rollouts()  # sample some transitions with dummy goal [0]*n
+    # goals = [ag[goal_step_size] for ag in episode['ag']]  # just goal_step_size'th entry in episode as first "goal"
+    goals = sample_goal(path=os.getcwd()+'/data/observations_2019-01-09 22:13:01.435718.dat',
+                        env=rollout_worker.envs[0], offset=12, num_samples=10)
     new_rollouts_per_epoch = 1
     trained_epochs, best_success_rate = load_stats(epoch_log_path)  # use load_stats function for continuing training
 
     rank = MPI.COMM_WORLD.Get_rank()
     for epoch in range(trained_epochs+1, n_epochs):
         logger.info('starting epoch: {}'.format(epoch))
+        if rank == 0:
+            print("\tgenerate episode")
         for g in np.random.permutation(goals)[:new_rollouts_per_epoch]: # not for each g in goals, that would grow quite fast
             for e in rollout_worker.envs:
                 e.goal = g
             episode = rollout_worker.generate_rollouts()
             # and store the achieved goal in step t = goal_step size in goals
-            for ag in episode['ag']:
-                goals.append(ag[goal_step_size])
+            # for ag in episode['ag']:
+            #     goals.append(ag[goal_step_size])
             policy.store_episode(episode) # get trajectories with real goals [g] in observation
 
-        for _ in range(n_cycles):
-        # for _ in range(2):
+        if rank==0:
+            print("\ttrain")
+        # for _ in range(n_cycles):
+        for _ in range(2):
             policy.train()
         policy.update_target_net()
 
@@ -155,10 +206,13 @@ def train(env, policy, rollout_worker,
         evaluator.clear_history()
         goals_evaluation = get_random_goals(goals, n_test_rollouts)
         # goals_evaluation = get_random_goals(goals, 2)
+        if rank == 0:
+            print("\tevaluate")
         for g in goals_evaluation:
             for e in evaluator.envs:
                 e.goal = g
             evaluator.generate_rollouts()
+            break
 
         # save the policy if it's better than the previous ones
         success_rate = mpi_average(evaluator.current_success_rate())
@@ -213,7 +267,7 @@ def launch(
     else:
         logger.configure()
     logdir = logger.get_dir()
-    assert logdir is not None
+    assert logdir is not None, "logdir was None"
     os.makedirs(logdir, exist_ok=True)
 
     # Seed everything.
