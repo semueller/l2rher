@@ -643,6 +643,30 @@ class RunEnv2(ProstheticsEnv):
             projection = np.array(projection)
             return projection
 
+        elif self.args.proj == '2Dpos':
+            pelvis_X = dict_['body_pos']['pelvis'][0]  # X - forward, Y - up, Z - left/right
+            projection = [dict_['body_pos']['pelvis'][1]]  # pelvis up
+            for dict_name in ['body_pos']:
+                for dict_name_2 in ['head', 'pelvis', 'tibia_r', 'tibia_l', 'talus_r', 'talus_l', 'toes_r', 'toes_l']:  # dict_[dict_name]
+                    if dict_name_2 == 'pelvis' and dict_name == 'body_pos':
+                        continue
+                    lll = dict_[dict_name][dict_name_2]
+                    if len(lll) > 0:
+                        for i in [0, 1]:
+                            l = lll[i]
+                            if dict_name == 'body_pos' and i == 0:
+                                projection += [l-pelvis_X]
+                            else:
+                                projection += [l]
+            projection += [dict_['misc']['mass_center_pos'][0] - pelvis_X]
+            projection += [dict_['misc']['mass_center_pos'][1]]
+            # projection += dict_['misc']['mass_center_vel']
+            print(len(projection))
+            assert len(projection) == 17
+            projection = np.array(projection)
+            return projection
+
+
         elif self.args.proj == '2DPro31':
             pelvis_X = dict_['body_pos']['pelvis'][0]  # X - forward, Y - up, Z - left/right
             projection = [dict_['body_pos']['pelvis'][1]]  # pelvis up
@@ -858,7 +882,9 @@ class RunEnv2(ProstheticsEnv):
             self.projection_dict = projection_dict
             projection = np.array(list(projection_dict.values()))
             return projection
-
+        else:
+            raise ValueError("{}: dict_to_vec conversion failed, unrecognized option '{}'".format(self.__class__.__name__,
+                                                                                                   self.args.proj))
 
 class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her compatible env
     def __init__(self, goaltype='', tolerance=None, **runenv2_args):
