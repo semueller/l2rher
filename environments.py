@@ -638,7 +638,7 @@ class RunEnv2(ProstheticsEnv):
             projection += [dict_['misc']['mass_center_pos'][0] - pelvis_X]
             projection += [dict_['misc']['mass_center_pos'][1]]
             projection += dict_['misc']['mass_center_vel']
-            print(len(projection))
+            # print(len(projection))
             assert len(projection) == 35
             projection = np.array(projection)
             return projection
@@ -661,7 +661,7 @@ class RunEnv2(ProstheticsEnv):
             projection += [dict_['misc']['mass_center_pos'][0] - pelvis_X]
             projection += [dict_['misc']['mass_center_pos'][1]]
             # projection += dict_['misc']['mass_center_vel']
-            print(len(projection))
+            # print(len(projection))
             assert len(projection) == 17
             projection = np.array(projection)
             return projection

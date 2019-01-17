@@ -195,12 +195,11 @@ def train(env, policy, rollout_worker,
                 e.goal = g
             episode = rollout_worker.generate_rollouts()
             policy.store_episode(episode) # get trajectories with real goals [g] in observation
-
-        if rank == 0:
-            print("\ttrain")
-        for _ in range(n_cycles):
-            policy.train()
-        policy.update_target_net()
+            if rank == 0:
+                print("\ttrain")
+            for _ in range(n_cycles):
+                policy.train()
+            policy.update_target_net()
 
         # evaluate
         evaluator.clear_history()
