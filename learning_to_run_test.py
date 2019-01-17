@@ -163,7 +163,7 @@ def train(env, policy, rollout_worker,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval, evaluator, policy_path,
           save_policies=True, model_name='model.ckpt', **kwargs):
 
-    testing = True
+    testing = False
     if testing:
         n_test_rollouts = 1
 
