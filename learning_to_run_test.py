@@ -101,7 +101,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--modeldim', dest='modeldim', action='store', default='3D', choices=('3D', '2D'), type=str)
     parser.add_argument('--prosthetic', dest='prosthetic', action='store', default=1, type=int)
-    parser.add_argument('--proj', type=str, default='3DPro37', help='dict to projection (version): 2D35, 3DPro35, 3DPro37, 3D39, 3DPro37_2, 3D39_2')
+    parser.add_argument('--proj', type=str, default='2Dpro', help='dict to projection (version): 2D35, 3DPro35, 3DPro37, 3D39, 3DPro37_2, 3D39_2')
     parser.add_argument('--accuracy', dest='accuracy', action='store', default=5e-5, type=float)
     parser.add_argument('--difficulty', dest='difficulty', action='store', default=0, type=int)
     parser.add_argument('--episodes', type=int, default=37, help="Number of test episodes.")
@@ -142,7 +142,6 @@ def make_running_env(visualize=False):
         assert(hasattr(make_running_env, 'goaltype'))
         env = RunEnv2HER
         args = get_args()
-        args.proj= '2Dpos'  # '3DPro37'
         env = env(goaltype=make_running_env.goaltype, visualize=True, model=args.modeldim, prosthetic=args.prosthetic, difficulty=args.difficulty, skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
     elif make_running_env.envname == 'L2RunEnvHER':
         _osim = import_module('osim.env')
