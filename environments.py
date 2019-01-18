@@ -624,7 +624,8 @@ class RunEnv2(ProstheticsEnv):
             pelvis_X = dict_['body_pos']['pelvis'][0]  # X - forward, Y - up, Z - left/right
             projection = [dict_['body_pos']['pelvis'][1]]  # pelvis up
             for dict_name in ['body_pos', 'body_vel']:
-                for dict_name_2 in ['head', 'pelvis', 'tibia_r', 'tibia_l', 'talus_r', 'talus_l', 'toes_r', 'toes_l']:  # dict_[dict_name]
+                for dict_name_2 in ['head', 'pelvis', 'tibia_r', 'tibia_l', 'talus_r', 'talus_l', 'toes_r',
+                                    'toes_l']:  # dict_[dict_name]
                     if dict_name_2 == 'pelvis' and dict_name == 'body_pos':
                         continue
                     lll = dict_[dict_name][dict_name_2]
@@ -632,16 +633,19 @@ class RunEnv2(ProstheticsEnv):
                         for i in [0, 1]:
                             l = lll[i]
                             if dict_name == 'body_pos' and i == 0:
-                                projection += [l-pelvis_X]
+                                projection += [l - pelvis_X]
                             else:
                                 projection += [l]
-            projection += [dict_['misc']['mass_center_pos'][0] - pelvis_X]
+            projection += [dict_['misc']['mass_center_pos'][
+                               0] - pelvis_X]  # [0] - X forward/backward, [1] - Y up/down, [2] - Z left/right
             projection += [dict_['misc']['mass_center_pos'][1]]
-            projection += dict_['misc']['mass_center_vel']
-            # print(len(projection))
+            projection += [dict_['misc']['mass_center_vel'][0]]
+            projection += [dict_['misc']['mass_center_vel'][1]]
+
             assert len(projection) == 35
             projection = np.array(projection)
             return projection
+
 
         elif self.args.proj == '2Dpos':
             pelvis_X = dict_['body_pos']['pelvis'][0]  # X - forward, Y - up, Z - left/right
