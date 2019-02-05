@@ -33,26 +33,11 @@ def sample_goal(path, env=None, num_samples=1, offset=12):# strategy="fourth", g
 
     with open(path, 'rb') as file:
         res = []
-        iteration_number = 0
         unpickled = pickle.Unpickler(file)
-        data = []
-        #
-        # while True:
-        #     if iteration_number == num_samples:
-        #         break
-        #     iteration_number += 1
-        #     try:
-        #         for i in range(offset-1):
-        #             _ = unpickled.load()
-        #         data = unpickled.load()
-        #         goal = env.get_achieved_goal(data)
-        #         res.append(goal)
-        #     except EOFError:
-        #         break
         for _ in range(10):
             try:
                 data = unpickled.load()
-                goal = env.get_achieved_goal(data)
+                goal = env.dict_to_vec(data)
                 res.append(goal)
             except EOFError:
                 break
@@ -101,7 +86,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--modeldim', dest='modeldim', action='store', default='3D', choices=('3D', '2D'), type=str)
     parser.add_argument('--prosthetic', dest='prosthetic', action='store', default=1, type=int)
-    parser.add_argument('--proj', type=str, default='2Dpro', help='dict to projection (version): 2D35, 3DPro35, 3DPro37, 3D39, 3DPro37_2, 3D39_2')
+    parser.add_argument('--proj', type=str, default='2Dpos', help='dict to projection (version): 2D35, 3DPro35, 3DPro37, 3D39, 3DPro37_2, 3D39_2')
     parser.add_argument('--accuracy', dest='accuracy', action='store', default=5e-5, type=float)
     parser.add_argument('--difficulty', dest='difficulty', action='store', default=0, type=int)
     parser.add_argument('--episodes', type=int, default=37, help="Number of test episodes.")
@@ -142,7 +127,9 @@ def make_running_env(visualize=False):
         assert(hasattr(make_running_env, 'goaltype'))
         env = RunEnv2HER
         args = get_args()
-        env = env(goaltype=make_running_env.goaltype, visualize=True, model=args.modeldim, prosthetic=args.prosthetic, difficulty=args.difficulty, skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
+        env = env(goaltype=make_running_env.goaltype, visualize=True, model=args.modeldim,
+                  prosthetic=args.prosthetic, difficulty=args.difficulty,
+                  skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
     elif make_running_env.envname == 'L2RunEnvHER':
         _osim = import_module('osim.env')
         # envname needs to be set outside
@@ -168,6 +155,7 @@ def train(env, policy, rollout_worker,
 
     global goal_step_size
     saver = tf.train.Saver()
+    # look for existing policy or create paths for new one
     if os.path.isfile(policy_path+model_name):
         saver.restore(policy.sess, policy_path+model_name)
         logger.info("Successfully restored policy from {}".format(policy_path))
@@ -178,9 +166,11 @@ def train(env, policy, rollout_worker,
             os.mkdir(policy_path)
 
     epoch_log_path = policy_path+'epoch.txt'
-    # load goals from observations in path
+    # load observations from path and convert them to goals with env.goal_from_observation function
     goals = sample_goal(path=os.getcwd()+'/data/observations_2019-01-09 22:13:01.435718.dat',
                         env=rollout_worker.envs[0], offset=12, num_samples=10)
+
+    # number of rollouts that are generated per epoch per env in the rollout worker
     new_rollouts_per_epoch = 5 if not testing else 1
     trained_epochs, best_success_rate = load_stats(epoch_log_path)  # use load_stats function for continuing training
 
@@ -189,22 +179,24 @@ def train(env, policy, rollout_worker,
         logger.info('starting epoch: {}'.format(epoch))
         if rank == 0:
             print("\tgenerate episode")
-        for g in np.random.permutation(goals)[:new_rollouts_per_epoch]: # not for each g in goals, that would grow quite fast
+        for g in np.random.permutation(goals)[:new_rollouts_per_epoch]:
+            # set goal = g in each env
             for e in rollout_worker.envs:
                 e.goal = g
+            # rollout on this goal
             episode = rollout_worker.generate_rollouts()
-            policy.store_episode(episode) # get trajectories with real goals [g] in observation
+            policy.store_episode(episode)  # get trajectories with real goals [g] in observation
             if rank == 0:
                 print("\ttrain")
+            # train on newly generated rollout for n_cycles
             for _ in range(n_cycles):
                 policy.train()
+            # update ddpg target network
             policy.update_target_net()
 
-        # evaluate
+        # evaluate current policy
         evaluator.clear_history()
-        # goals_evaluation = get_random_goals(goals, n_test_rollouts)
         goals_evaluation = np.random.permutation(goals)[:n_test_rollouts]  # automatically handles out of bounds
-        # goals_evaluation = get_random_goals(goals, 2)
         if rank == 0:
             print("\tevaluate")
         for g in goals_evaluation:
@@ -354,4 +346,5 @@ def main(**kwargs):
 
 
 if __name__ == '__main__':
+    print("currently only supports --env RunEnv2HER")
     main()

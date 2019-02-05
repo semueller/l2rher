@@ -8,7 +8,7 @@ from gym.spaces import Box, MultiBinary
 '''
 
 class RunEnv2(ProstheticsEnv):
-    def __init__(self, visualize=False, integrator_accuracy=5e-5, model='2D', prosthetic=False, difficulty=0, skip_frame=3, reward_mult=1., args=None):
+    def __init__(self, visualize=True, integrator_accuracy=5e-5, model='2D', prosthetic=False, difficulty=0, skip_frame=3, reward_mult=1., args=None):
         # print('#############################################')
         # print('RunEnv2(ProstheticsEnv)  »  __init__  »  args = ' + str(args))
         # print('#############################################')
@@ -642,14 +642,14 @@ class RunEnv2(ProstheticsEnv):
             projection += [dict_['misc']['mass_center_vel'][0]]
             projection += [dict_['misc']['mass_center_vel'][1]]
 
-            assert len(projection) == 35
+            assert len(projection) == 36
             projection = np.array(projection)
             return projection
 
 
         elif self.args.proj == '2Dpos':
             pelvis_X = dict_['body_pos']['pelvis'][0]  # X - forward, Y - up, Z - left/right
-            projection = [dict_['body_pos']['pelvis'][1]]  # pelvis up
+            projection = dict_['body_pos']['pelvis'][:2]  # pelvis X+Y
             for dict_name in ['body_pos']:
                 for dict_name_2 in ['head', 'pelvis', 'tibia_r', 'tibia_l', 'talus_r', 'talus_l', 'toes_r', 'toes_l']:  # dict_[dict_name]
                     if dict_name_2 == 'pelvis' and dict_name == 'body_pos':
@@ -666,7 +666,7 @@ class RunEnv2(ProstheticsEnv):
             projection += [dict_['misc']['mass_center_pos'][1]]
             # projection += dict_['misc']['mass_center_vel']
             # print(len(projection))
-            assert len(projection) == 17
+            assert len(projection) == 18
             projection = np.array(projection)
             return projection
 
@@ -894,75 +894,20 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her
     def __init__(self, goaltype='', tolerance=None, **runenv2_args):
         super(RunEnv2HER, self).__init__(**runenv2_args)
         self.goal = None
-        if goaltype == 'pos_mass':
-            self.get_achieved_goal = self._goal_pos_mass
-        elif goaltype == 'no_vel_no_rot':
-            self.get_achieved_goal = self._goal_no_vel_no_rot
-        elif goaltype == 'dict_to_vec':
-            self.get_achieved_goal = self._goal_dict_to_vec
-        else:
-            self.get_achieved_goal = self._goal_std
 
         self.tolerance = tolerance # TODO tune
 
-    def _goal_std(self, state_desc=None):
-        if not state_desc:
-            return super(RunEnv2HER, self).get_state_desc()
-        return state_desc
+    def dict_to_vec(self, dict_):
+        if self.args.proj != '2Dpos':
+            for _ in range(10):
+                print("IS PELVIS_X ON THE CORRECT POSITION OF THE GOAL VECTOR?")
+        proj = super(RunEnv2HER, self).dict_to_vec(dict_)
 
-    def _goal_dict_to_vec(self, state_desc=None):
-        if not state_desc:
-            state_desc = super(RunEnv2HER, self).get_state_desc()
-        goal = self.dict_to_vec(state_desc)
-        return goal
+        # asummption that pelvis-X is the first entry of projection
+        pelvis_diff = 0 if self.goal is None else proj[0] - self.goal[0]
+        proj = np.concatenate((proj, [pelvis_diff]), 0)  # put diff at the end of the observation
 
-    def _goal_no_vel_no_rot(self, state_desc=None):
-        if not state_desc:
-            state_desc = super(RunEnv2HER, self).get_state_desc()
-        goal = []
-        for k, v in state_desc.items():
-            if 'vel' in k or 'rot' in k:
-                continue
-            for k2, v2, in v.items():
-                if 'vel' in k2 or 'rot' in k2:
-                    continue
-                goal.append(v2[0:2])
-        return goal
-
-    def _goal_pos_mass(self, state_desc=None):
-        if not state_desc:
-            state_desc = super(RunEnv2HER, self).get_state_desc()
-        ##  from ProstethicsEnv.get_observation to compute pelvis needed for mass_center_pos
-        tmp = []
-        pelvis = None
-
-        for body_part in ["pelvis", "head", "torso", "toes_l", "toes_r", "talus_l", "talus_r"]:
-            if self.prosthetic and body_part in ["toes_r", "talus_r"]:
-                tmp += [0] * 9
-                continue
-            cur = []
-            cur += state_desc["body_pos"][body_part][0:2]
-            cur += state_desc["body_vel"][body_part][0:2]
-            cur += state_desc["body_acc"][body_part][0:2]
-            cur += state_desc["body_pos_rot"][body_part][2:]
-            cur += state_desc["body_vel_rot"][body_part][2:]
-            cur += state_desc["body_acc_rot"][body_part][2:]
-            if body_part == "pelvis":
-                pelvis = cur
-                tmp += cur[1:]
-                break
-            else:
-                cur_upd = cur
-                cur_upd[:2] = [cur[i] - pelvis[i] for i in range(2)]
-                cur_upd[6:7] = [cur[i] - pelvis[i] for i in range(6, 7)]
-                tmp += cur
-        ##
-        goal = []
-        for joint in ["ankle_l","ankle_r","back","hip_l","hip_r","knee_l","knee_r"]:
-            goal += state_desc["joint_pos"][joint]
-
-        goal += [state_desc["misc"]["mass_center_pos"][i] - pelvis[i] for i in range(2)]
-        return goal
+        return proj
 
     @staticmethod
     def metric(p1, p2):
@@ -996,7 +941,7 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her
 
     def get_observation(self):
         obs = super(RunEnv2HER, self).get_observation()
-        achieved_goal = self.get_achieved_goal(state_desc=super(RunEnv2HER, self).get_state_desc())
+        achieved_goal = self.dict_to_vec(super(RunEnv2HER, self).get_state_desc())
         if self.goal is None:
             desired_goal = [0]*len(achieved_goal)
         else:
@@ -1005,6 +950,8 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her
             self.tolerance = 0.075*len(desired_goal)
             print('\t\t TOLERANCE SET TO {}'.format(self.tolerance))
         return {
+            # the ddpg from baselines.her concatenates observations and achieved_goals itself
+            # observation is quite large, |obs+goal| ~ 200 entries, might this be problematic?
             'observation': np.array(obs),
             'desired_goal': np.array(desired_goal),
             'achieved_goal': np.array(achieved_goal)
