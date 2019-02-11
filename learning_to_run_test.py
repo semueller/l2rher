@@ -125,14 +125,14 @@ def make_running_env(visualize=False):
         assert(hasattr(make_running_env, 'goaltype'))
         env = RunEnv2HER
         args = get_args()
-        env = env(goaltype=make_running_env.goaltype, visualize=True, model=args.modeldim,
+        env = env(goaltype=make_running_env.goaltype, visualize=visualize, model=args.modeldim,
                   prosthetic=args.prosthetic, difficulty=args.difficulty,
                   skip_frame=args.skip_frame, args=args)#goaltype=make_running_env.goaltype)
     elif make_running_env.envname == 'L2RunEnvHER':
         _osim = import_module('osim.env')
         # envname needs to be set outside
         env = getattr(_osim, make_running_env.envname)
-        env = env(visualize=True)
+        env = env(visualize=visualize)
     else:
         raise ValueError('env not recognized, '
                        'must be one of[RunEnv2HER, L2RunEnvHER], but was {}'.format(make_running_env.envname))
@@ -148,7 +148,9 @@ def train(env, policy, rollout_worker,
           save_policies=True, model_name='model.ckpt', **kwargs):
 
     rank = MPI.COMM_WORLD.Get_rank()
-    saving_frequency = 25
+    if policy_save_interval is None or 0:
+        logger.info('setting policy_save_interval to default 25')
+        policy_save_interval = 25
     testing = True
     if testing:
         n_test_rollouts = 1
@@ -223,6 +225,7 @@ def train(env, policy, rollout_worker,
             goal_step_size += 1
             logger.info('Increased goal_step_size to {}'.format(goal_step_size))
 
+
         if save_policies and rank == 0:
             if success_rate >= best_success_rate:
                 logger.info(
@@ -230,7 +233,7 @@ def train(env, policy, rollout_worker,
                 save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
                     model_name, epoch_log_path, rank)  # not beautiful but declutters this part
                 best_success_rate = success_rate
-            elif epoch % saving_frequency == 0:
+            if epoch % policy_save_interval == 0:
                 logger.info('Periodic save of policy')
                 save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, periodic_path+
                             '/{}/'.format(epoch),
