@@ -210,7 +210,6 @@ def train(env, policy, rollout_worker,
         if rank == 0:
             logger.info("\tevaluate")
         for g in goals_evaluation:
-            continue
             for e in evaluator.envs:
                 e.goal = g
             evaluator.generate_rollouts()
@@ -225,14 +224,13 @@ def train(env, policy, rollout_worker,
             logger.info('Increased goal_step_size to {}'.format(goal_step_size))
 
         if save_policies and rank == 0:
-            # if success_rate >= best_success_rate:
-            if False:
+            if success_rate >= best_success_rate:
                 logger.info(
                     'New best success rate: {}. Saving policy to {} ...'.format(best_success_rate, policy_path + model_name))
                 save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
                     model_name, epoch_log_path, rank)  # not beautiful but declutters this part
                 best_success_rate = success_rate
-            elif True:  # epoch % saving_frequency == 0:
+            elif epoch % saving_frequency == 0:
                 logger.info('Periodic save of policy')
                 save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, periodic_path+
                             '/{}/'.format(epoch),
