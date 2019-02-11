@@ -894,7 +894,6 @@ class RunEnv2HER(RunEnv2):  # semueller: Converts class RunEnv2 to baselines.her
     def __init__(self, goaltype='', tolerance=None, **runenv2_args):
         super(RunEnv2HER, self).__init__(**runenv2_args)
         self.goal = None
-
         self.tolerance = tolerance # TODO tune
 
     def dict_to_vec(self, dict_):

@@ -67,18 +67,16 @@ def log(logger, epoch, evaluator, policy, rollout_worker, rank):
 
 def save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
                 model_name, epoch_log_path, rank):
-    if rank == 0 and success_rate >= best_success_rate:
-        best_success_rate = success_rate
-        logger.info(
-            'New best success rate: {}. Saving policy to {} ...'.format(best_success_rate, policy_path + model_name))
-        pth = saver.save(policy.sess, policy_path + model_name)
-        evaluator.save_policy(policy_path + 'policy.pkl')
-        try:
-            with open(epoch_log_path, 'a') as file:
-                file.write(str(epoch) + ' ' + str(best_success_rate) + '\n')
-        except Exception as e:
-            logger.info(e)
-        print("saved policy to {}".format(pth))
+    if not os.path.exists(policy_path):
+        os.mkdir(policy_path)
+    pth = saver.save(policy.sess, policy_path + model_name)
+    evaluator.save_policy(policy_path + 'policy.pkl')
+    try:
+        with open(epoch_log_path, 'a') as file:
+            file.write(str(epoch) + ' ' + str(best_success_rate) + '\n')
+    except Exception as e:
+        logger.info(e)
+    logger.info("saved policy to {}".format(pth))
 
 def get_args():
     # taken from L2R.run_experiment (0123Andrew/L2R.git), to parametrize RunEnv2HER
@@ -149,7 +147,9 @@ def train(env, policy, rollout_worker,
           n_epochs, n_test_rollouts, n_cycles, n_batches, policy_save_interval, evaluator, policy_path,
           save_policies=True, model_name='model.ckpt', **kwargs):
 
-    testing = False
+    rank = MPI.COMM_WORLD.Get_rank()
+    saving_frequency = 25
+    testing = True
     if testing:
         n_test_rollouts = 1
 
@@ -165,20 +165,30 @@ def train(env, policy, rollout_worker,
             logger.info('creating directory {}'.format(policy_path))
             os.mkdir(policy_path)
 
+    periodic_path = os.path.join(policy_path, 'periodic', '')
+    if not os.path.exists(periodic_path):
+        logger.info('creating directory {}'.format(policy_path))
+        os.mkdir(periodic_path)
+
     epoch_log_path = policy_path+'epoch.txt'
     # load observations from path and convert them to goals with env.goal_from_observation function
     goals = sample_goal(path=os.getcwd()+'/data/observations_2019-01-09 22:13:01.435718.dat',
                         env=rollout_worker.envs[0], offset=12, num_samples=10)
+    if rank == 0:
+        with open(os.path.join(policy_path, 'env_conf.json'), 'w') as fp:
+            env_conf = rollout_worker.envs[0].args.__dict__
+            env_conf['name'] = rollout_worker.envs[0].__class__.__name__
+            env_conf['goals'] = [list(g) for g in goals]
+            json.dump(env_conf, fp)
 
     # number of rollouts that are generated per epoch per env in the rollout worker
     new_rollouts_per_epoch = 5 if not testing else 1
     trained_epochs, best_success_rate = load_stats(epoch_log_path)  # use load_stats function for continuing training
 
-    rank = MPI.COMM_WORLD.Get_rank()
     for epoch in range(trained_epochs+1, n_epochs):
         logger.info('starting epoch: {}'.format(epoch))
         if rank == 0:
-            print("\tgenerate episode")
+            logger.info("\tgenerate episode")
         for g in np.random.permutation(goals)[:new_rollouts_per_epoch]:
             # set goal = g in each env
             for e in rollout_worker.envs:
@@ -187,7 +197,7 @@ def train(env, policy, rollout_worker,
             episode = rollout_worker.generate_rollouts()
             policy.store_episode(episode)  # get trajectories with real goals [g] in observation
             if rank == 0:
-                print("\ttrain")
+                logger.info("\ttrain")
             # train on newly generated rollout for n_cycles
             for _ in range(n_cycles):
                 policy.train()
@@ -198,24 +208,35 @@ def train(env, policy, rollout_worker,
         evaluator.clear_history()
         goals_evaluation = np.random.permutation(goals)[:n_test_rollouts]  # automatically handles out of bounds
         if rank == 0:
-            print("\tevaluate")
+            logger.info("\tevaluate")
         for g in goals_evaluation:
+            continue
             for e in evaluator.envs:
                 e.goal = g
             evaluator.generate_rollouts()
 
         # save the policy if it's better than the previous ones
-        success_rate = mpi_average(evaluator.current_success_rate())
-
+        # success_rate = mpi_average(evaluator.current_success_rate())
+        success_rate = 0.00001
         # record logs
         log(logger, epoch, evaluator, policy, rollout_worker, rank)
         if success_rate > 0.9:
             goal_step_size += 1
             logger.info('Increased goal_step_size to {}'.format(goal_step_size))
 
-        if save_policies:
-            save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
-                model_name, epoch_log_path, rank)  # not beatiful but declutters this part
+        if save_policies and rank == 0:
+            # if success_rate >= best_success_rate:
+            if False:
+                logger.info(
+                    'New best success rate: {}. Saving policy to {} ...'.format(best_success_rate, policy_path + model_name))
+                save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, policy_path,
+                    model_name, epoch_log_path, rank)  # not beautiful but declutters this part
+                best_success_rate = success_rate
+            elif True:  # epoch % saving_frequency == 0:
+                logger.info('Periodic save of policy')
+                save_policy(logger, saver, epoch, best_success_rate, success_rate, policy, evaluator, periodic_path+
+                            '/{}/'.format(epoch),
+                    model_name, epoch_log_path, rank)
 
 
         # make sure that different threads have different seeds
