@@ -27,21 +27,32 @@ from environments import RunEnv2HER, RunEnv2
 goal_step_size = 1  # use this as a global counter to be able to update the value in _sample_her_transitions
 
 
-def sample_goal(path, env=None, num_samples=1, offset=12):# strategy="fourth", goal_type="goal_mass"):
+def sample_goal(path, env=None, num_samples=10, offset=12):# strategy="fourth", goal_type="goal_mass"):
     assert(env is not None), "env was None"
-    assert(os.path.isfile(path)), "path didn't point to a file"
+    assert(os.path.exists(path)), "path doesn't exist"
+    res = []
+    if os.path.isfile(path):
+        with open(path, 'rb') as file:
+            unpickled = pickle.Unpickler(file)
+            for _ in range(num_samples):
+                try:
+                    data = unpickled.load()
+                    goal = env.dict_to_vec(data)
+                    res.append(goal)
+                except EOFError:
+                    break
+    else:
+        logger.info('loading {} observations per file in {}'.format(num_samples, path))
+        files = [os.path.join(path,f) for f in os.listdir(path) if '.pkl' in f[-4:]]
+        for filename in files:
+            with open(filename, 'rb') as file:
+                unpkl = pickle.Unpickler(file)
+                data = unpkl.load()
+                for i in range(num_samples):
+                    res.append(env.dict_to_vec(data[i]))
+                # res.append([env.dict_to_vec(data[i]) for i in range(num_samples)])
 
-    with open(path, 'rb') as file:
-        res = []
-        unpickled = pickle.Unpickler(file)
-        for _ in range(10):
-            try:
-                data = unpickled.load()
-                goal = env.dict_to_vec(data)
-                res.append(goal)
-            except EOFError:
-                break
-
+    assert len(res) > 0
     print('successfully loaded {} goals'.format(len(res)))
     return res
 
@@ -151,7 +162,7 @@ def train(env, policy, rollout_worker,
     if policy_save_interval is None or 0:
         logger.info('setting policy_save_interval to default 25')
         policy_save_interval = 25
-    testing = True
+    testing = False
     if testing:
         n_test_rollouts = 1
 
@@ -174,7 +185,7 @@ def train(env, policy, rollout_worker,
 
     epoch_log_path = policy_path+'epoch.txt'
     # load observations from path and convert them to goals with env.goal_from_observation function
-    goals = sample_goal(path=os.getcwd()+'/data/observations_2019-01-09 22:13:01.435718.dat',
+    goals = sample_goal(path=os.getcwd()+'/data/',
                         env=rollout_worker.envs[0], offset=12, num_samples=10)
     if rank == 0:
         with open(os.path.join(policy_path, 'env_conf.json'), 'w') as fp:
